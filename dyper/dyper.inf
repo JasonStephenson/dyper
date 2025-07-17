@@ -1,0 +1,52 @@
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = System
+ClassGuid   = {4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider    = %ManufacturerName%
+CatalogFile = dyper.cat
+DriverVer   = 
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 12 ; System32\drivers
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+dyper.sys = 1,,
+
+;*****************************************
+; Install Section
+;*****************************************
+
+[DefaultInstall.NT$ARCH$]
+CopyFiles=File_Copy
+
+[File_Copy]
+dyper.sys
+
+;-------------- Service installation
+[DefaultInstall.NT$ARCH$.Services]
+AddService = dyper,%SPSVCINST_ASSOCSERVICE%, dyper_Service_Inst
+
+; -------------- dyper driver install sections
+[dyper_Service_Inst]
+DisplayName    = %dyper.SVCDESC%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\dyper.sys
+
+[DefaultInstall.NT$ARCH$.Wdf]
+KmdfService = dyper, dyper_wdfsect
+
+[dyper_wdfsect]
+KmdfLibraryVersion = $KMDFVERSION$
+
+[Strings]
+SPSVCINST_ASSOCSERVICE = 0x00000002
+ManufacturerName = "JST"
+DiskName = "dyper Installation Disk"
+dyper.DeviceDesc = "dyper Device"
+dyper.SVCDESC = "dyper Service"
