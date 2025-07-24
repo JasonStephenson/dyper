@@ -5,6 +5,8 @@ VisualStudioVersion = 17.14.36310.24
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dyper", "dyper\dyper.vcxproj", "{B75A9E44-0A69-9C69-2A66-985C40B2A458}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dyperum", "dyperum\dyperum.vcxproj", "{B8AFF87B-992D-41D9-887A-6FB9B8C314D2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -17,6 +19,10 @@ Global
 		{B75A9E44-0A69-9C69-2A66-985C40B2A458}.Release|x64.ActiveCfg = Release|x64
 		{B75A9E44-0A69-9C69-2A66-985C40B2A458}.Release|x64.Build.0 = Release|x64
 		{B75A9E44-0A69-9C69-2A66-985C40B2A458}.Release|x64.Deploy.0 = Release|x64
+		{B8AFF87B-992D-41D9-887A-6FB9B8C314D2}.Debug|x64.ActiveCfg = Debug|x64
+		{B8AFF87B-992D-41D9-887A-6FB9B8C314D2}.Debug|x64.Build.0 = Debug|x64
+		{B8AFF87B-992D-41D9-887A-6FB9B8C314D2}.Release|x64.ActiveCfg = Release|x64
+		{B8AFF87B-992D-41D9-887A-6FB9B8C314D2}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
