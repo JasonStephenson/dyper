@@ -1,3 +1,5 @@
+#include <Windows.h>
+
 #include <iostream>
 #include <string>
 
@@ -46,5 +48,21 @@ int main() {
         return -1;
     }
 
+    HANDLE hDevice = CreateFile(L"\\\\.\\Dyper",
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL, 
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL);
+
+    if (hDevice == INVALID_HANDLE_VALUE) {
+        std::cout << std::hex;
+        std::cout << "CreateFile error 0x" << GetLastError() << "\n";
+        std::cout << std::dec;
+        return -1;
+    }
+
+    CloseHandle(hDevice);
     std::cout << "All ok\n";
 }

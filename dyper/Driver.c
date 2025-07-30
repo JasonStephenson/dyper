@@ -8,6 +8,8 @@ EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL WdfQueueDeviceIoControl;
 EVT_WDF_IO_QUEUE_IO_WRITE WdfQueueWrite;
 EVT_WDF_IO_QUEUE_IO_READ WdfQueueRead;
 
+extern void EnableSvme();
+
 NTSTATUS
 DriverEntry(
     _In_ PDRIVER_OBJECT DriverObject,
@@ -111,6 +113,9 @@ WdfDeviceFileCreate(
     UNREFERENCED_PARAMETER(fileObjectd);
    
     DbgPrintInfo("WdfDeviceFileCreate\n");
+
+    EnableSvme();
+
     WdfRequestComplete(request, STATUS_SUCCESS);
 }
 
