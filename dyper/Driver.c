@@ -17,7 +17,7 @@ extern BOOLEAN SupportCheckSVM();
 BOOLEAN PrintAndConfirmCpuSuport() {
     BOOLEAN isAmd = SupportCheckIsAMD();
     DbgPrintInfo("IsAMD: %d\n", isAmd);
-    
+
     /* If its not AMD no point checking the rest */
     if (!isAmd) {
         return FALSE;
@@ -124,26 +124,52 @@ DriverUnload(
     DbgPrintInfo("Unloaded\n");
 }
 
-
 VOID
 WdfDeviceFileCreate(
-    _In_ WDFDEVICE device, 
-    _In_ WDFREQUEST request, 
+    _In_ WDFDEVICE device,
+    _In_ WDFREQUEST request,
     _In_ WDFFILEOBJECT fileObjectd
 )
 {
     UNREFERENCED_PARAMETER(device);
     UNREFERENCED_PARAMETER(request);
     UNREFERENCED_PARAMETER(fileObjectd);
-   
+
     DbgPrintInfo("WdfDeviceFileCreate\n");
 
-    EnableSvme();
+    USHORT groupCount = KeQueryActiveGroupCount();
+    for (USHORT groupNum = 0; groupNum < groupCount; groupNum++) {
+
+        GROUP_AFFINITY current;
+        GROUP_AFFINITY first;
+        RtlZeroMemory(&current, sizeof(current));
+        RtlZeroMemory(&first, sizeof(first));
+
+        ULONG procCount = KeQueryActiveProcessorCountEx(groupNum);
+        for (ULONG procNum = 0; procNum < procCount; procNum++) {
+            
+            current.Group = groupNum;
+            current.Mask = 1i64 << procNum;
+            
+            /* Store the default group affinity*/
+            if (procNum == 0) {
+                KeSetSystemGroupAffinityThread(&current, &first);
+            }
+            else {
+                KeSetSystemGroupAffinityThread(&current, NULL);
+            }
+
+            DbgPrintInfo("Turning on SVME for CPU%u in group %u\n", procNum, groupNum);
+            EnableSvme();
+        }
+        KeRevertToUserGroupAffinityThread(&first);
+    }
+
 
     WdfRequestComplete(request, STATUS_SUCCESS);
 }
 
-VOID 
+VOID
 WdfDeviceFileClose(
     _In_ WDFFILEOBJECT fileObject
 )

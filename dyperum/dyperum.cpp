@@ -63,6 +63,23 @@ int main() {
         return -1;
     }
 
+    std::cout << "Enter command\n";
+    char c;
+    std::cin >> c;
+
+    bool running = true;
+    while (running) {
+        switch (c) {
+        case 'X':
+        case 'x':
+            running = false;
+            break;
+        default:
+            break;
+        }
+    }
+    
+
     CloseHandle(hDevice);
     std::cout << "All ok\n";
 }
