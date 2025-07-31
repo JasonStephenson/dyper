@@ -87,6 +87,7 @@
   </ItemGroup>
   <ItemGroup>
     <MASM Include="Source.asm" />
+    <MASM Include="SupportCheck.asm" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stdafx.h" />

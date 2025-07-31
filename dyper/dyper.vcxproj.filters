@@ -30,6 +30,9 @@
     <MASM Include="Source.asm">
       <Filter>Source Files</Filter>
     </MASM>
+    <MASM Include="SupportCheck.asm">
+      <Filter>Source Files</Filter>
+    </MASM>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stdafx.h">

@@ -10,13 +10,37 @@ EVT_WDF_IO_QUEUE_IO_READ WdfQueueRead;
 
 extern void EnableSvme();
 
+extern BOOLEAN SupportCheckMSR();
+extern BOOLEAN SupportCheckIsAMD();
+extern BOOLEAN SupportCheckSVM();
+
+BOOLEAN PrintAndConfirmCpuSuport() {
+    BOOLEAN isAmd = SupportCheckIsAMD();
+    DbgPrintInfo("IsAMD: %d\n", isAmd);
+    
+    /* If its not AMD no point checking the rest */
+    if (!isAmd) {
+        return FALSE;
+    }
+
+    BOOLEAN msrOk = SupportCheckMSR();
+    BOOLEAN svmOk = SupportCheckSVM();
+    DbgPrintInfo("RSMSR/WRMSR: %d\n", msrOk);
+    DbgPrintInfo("SVM: %d\n", svmOk);
+
+    return msrOk && svmOk;
+}
+
 NTSTATUS
 DriverEntry(
     _In_ PDRIVER_OBJECT DriverObject,
     _In_ PUNICODE_STRING RegistryPath
 )
 {
-    UNREFERENCED_PARAMETER(RegistryPath);
+    if (PrintAndConfirmCpuSuport() == FALSE) {
+        DbgPrintErr("CPU does not meet requirements\n");
+        return STATUS_NOT_SUPPORTED;
+    }
 
     /* Create a driver object */
     WDF_DRIVER_CONFIG config;
