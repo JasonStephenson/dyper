@@ -12,7 +12,7 @@ extern void EnableSvme();
 
 extern BOOLEAN SupportCheckMSR();
 extern BOOLEAN SupportCheckIsAMD();
-extern BOOLEAN SupportCheckSVM();
+extern BOOLEAN SupportCheckCanEnableSVM();
 
 BOOLEAN PrintAndConfirmCpuSuport() {
     BOOLEAN isAmd = SupportCheckIsAMD();
@@ -23,12 +23,17 @@ BOOLEAN PrintAndConfirmCpuSuport() {
         return FALSE;
     }
 
+    /* Need to be able to use RDMSR for other checks to be ok */
     BOOLEAN msrOk = SupportCheckMSR();
-    BOOLEAN svmOk = SupportCheckSVM();
     DbgPrintInfo("RSMSR/WRMSR: %d\n", msrOk);
-    DbgPrintInfo("SVM: %d\n", svmOk);
+    if (!msrOk) {
+        return FALSE;
+    }
 
-    return msrOk && svmOk;
+    BOOLEAN svmOk = SupportCheckCanEnableSVM();
+    DbgPrintInfo("Can enable SVM: %d\n", svmOk);
+
+    return svmOk;
 }
 
 NTSTATUS
@@ -137,6 +142,7 @@ WdfDeviceFileCreate(
 
     DbgPrintInfo("WdfDeviceFileCreate\n");
 
+    //TODO: Set up VMCB
     USHORT groupCount = KeQueryActiveGroupCount();
     for (USHORT groupNum = 0; groupNum < groupCount; groupNum++) {
 
