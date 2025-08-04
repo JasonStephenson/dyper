@@ -91,6 +91,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stdafx.h" />
+    <ClInclude Include="VMState.h" />
   </ItemGroup>
   <ItemGroup>
     <Inf Include="dyper.inf">

@@ -1,4 +1,7 @@
 #include "stdafx.h"
+#include "VMState.h"
+
+#define POOL_TAG 'rvrD'
 
 DRIVER_INITIALIZE DriverEntry;
 EVT_WDF_DRIVER_UNLOAD DriverUnload;
@@ -7,12 +10,22 @@ EVT_WDF_FILE_CLOSE WdfDeviceFileClose;
 EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL WdfQueueDeviceIoControl;
 EVT_WDF_IO_QUEUE_IO_WRITE WdfQueueWrite;
 EVT_WDF_IO_QUEUE_IO_READ WdfQueueRead;
+EVT_WDF_OBJECT_CONTEXT_CLEANUP WdfDeviceContextCleanup;
 
 extern void EnableSvme();
+extern void DisableSvme();
+extern void SetHSave(ULONG_PTR physicalAddress);
 
 extern BOOLEAN SupportCheckMSR();
 extern BOOLEAN SupportCheckIsAMD();
 extern BOOLEAN SupportCheckCanEnableSVM();
+
+typedef struct _DEVICE_CONTEXT
+{
+    VM_STATE* pGuestStates;
+    ULONG totalProcessorCount;
+}DEVICE_CONTEXT, *PDEVICE_CONTEXTE;
+WDF_DECLARE_CONTEXT_TYPE(DEVICE_CONTEXT);
 
 BOOLEAN PrintAndConfirmCpuSuport() {
     BOOLEAN isAmd = SupportCheckIsAMD();
@@ -87,8 +100,13 @@ DriverEntry(
     WDF_FILEOBJECT_CONFIG_INIT(&fileEventCallbacks, WdfDeviceFileCreate, WdfDeviceFileClose, WDF_NO_EVENT_CALLBACK);
     WdfDeviceInitSetFileObjectConfig(pDevice, &fileEventCallbacks, WDF_NO_OBJECT_ATTRIBUTES);
 
+    /* Associate a Device context */
+    WDF_OBJECT_ATTRIBUTES objAttrs;
+    WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&objAttrs, DEVICE_CONTEXT);
+    objAttrs.EvtCleanupCallback = &WdfDeviceContextCleanup;
+
     WDFDEVICE wdfDevice;
-    status = WdfDeviceCreate(&pDevice, WDF_NO_OBJECT_ATTRIBUTES, &wdfDevice);
+    status = WdfDeviceCreate(&pDevice, &objAttrs, &wdfDevice);
     if (!NT_SUCCESS(status))
     {
         WdfDeviceInitFree(pDevice);
@@ -96,7 +114,8 @@ DriverEntry(
     }
 
     /*
-        WdfDeviceInitFree should NEVER be called after successful WdfDeviceCreate
+        WdfDeviceInitFree should NEVER be called after successful WdfDeviceCreate.
+        Context will be freed in the callback.
     */
 
     /* Symlink for usermode */
@@ -115,7 +134,26 @@ DriverEntry(
     ioQueueConfig.EvtIoDeviceControl = WdfQueueDeviceIoControl;
     ioQueueConfig.EvtIoRead = WdfQueueRead;
     ioQueueConfig.EvtIoWrite = WdfQueueWrite;
+    ioQueueConfig.PowerManaged = WdfFalse;
 
+    status = WdfIoQueueCreate(wdfDevice, &ioQueueConfig, WDF_NO_OBJECT_ATTRIBUTES, WDF_NO_HANDLE);
+    if (!NT_SUCCESS(status))
+    {
+        DbgPrintErr("Failed to WdfIoQueueCreate: 0x%X\n", status);
+        return status;
+    }
+
+    /* Populate device context */
+    DEVICE_CONTEXT* pDeviceContext = WdfObjectGet_DEVICE_CONTEXT(wdfDevice);
+    pDeviceContext->totalProcessorCount = KeQueryActiveProcessorCountEx(ALL_PROCESSOR_GROUPS);
+
+    pDeviceContext->pGuestStates = ExAllocatePool2(POOL_FLAG_PAGED, pDeviceContext->totalProcessorCount * sizeof(VM_STATE), POOL_TAG);
+    if (!pDeviceContext->pGuestStates) {
+        DbgPrintErr("Failed to allocate device context for %u processors\n", pDeviceContext->totalProcessorCount);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    DbgPrintInfo("Driver initialised. Allocated VMState for %u processors\n", pDeviceContext->totalProcessorCount);
     WdfControlFinishInitializing(wdfDevice);
     return status;
 }
@@ -136,13 +174,28 @@ WdfDeviceFileCreate(
     _In_ WDFFILEOBJECT fileObjectd
 )
 {
-    UNREFERENCED_PARAMETER(device);
     UNREFERENCED_PARAMETER(request);
     UNREFERENCED_PARAMETER(fileObjectd);
 
     DbgPrintInfo("WdfDeviceFileCreate\n");
 
-    //TODO: Set up VMCB
+    PHYSICAL_ADDRESS lowest;
+    lowest.QuadPart = 0;
+
+    PHYSICAL_ADDRESS highest;
+    highest.QuadPart = MAXLONGLONG;
+
+    PHYSICAL_ADDRESS zero;
+    zero.QuadPart = 0;
+
+    DEVICE_CONTEXT* pContext = WdfObjectGet_DEVICE_CONTEXT(device);
+
+    /*
+    Iterate all processors and turn on SVME.
+    Technically possible a new CPU appeared since the guest areas where allocated
+    Do not exceed pContext->totalProcessorCount, which describes the maximum number of guest state
+    */
+    ULONG procsInited = 0;
     USHORT groupCount = KeQueryActiveGroupCount();
     for (USHORT groupNum = 0; groupNum < groupCount; groupNum++) {
 
@@ -152,12 +205,14 @@ WdfDeviceFileCreate(
         RtlZeroMemory(&first, sizeof(first));
 
         ULONG procCount = KeQueryActiveProcessorCountEx(groupNum);
-        for (ULONG procNum = 0; procNum < procCount; procNum++) {
+        for (ULONG procNum = 0; 
+            procNum < procCount && procsInited <= pContext->totalProcessorCount;
+            procNum++) {
             
             current.Group = groupNum;
             current.Mask = 1i64 << procNum;
             
-            /* Store the default group affinity*/
+            /* Store the default group affinity */
             if (procNum == 0) {
                 KeSetSystemGroupAffinityThread(&current, &first);
             }
@@ -165,12 +220,42 @@ WdfDeviceFileCreate(
                 KeSetSystemGroupAffinityThread(&current, NULL);
             }
 
-            DbgPrintInfo("Turning on SVME for CPU%u in group %u\n", procNum, groupNum);
+            /* Virtual machine control block */
+            pContext->pGuestStates[procsInited].pVMCB = MmAllocateContiguousMemorySpecifyCache(VMCB_SIZE, lowest, highest, zero, MmCached);
+            if (!pContext->pGuestStates[procsInited].pVMCB) {
+                DbgPrintErr("[GROUP=%u, CPU=%u] Error allocating VMCB\n", groupNum, procNum);
+                continue;
+            }
+            RtlSecureZeroMemory(pContext->pGuestStates[procsInited].pVMCB, VMCB_SIZE);
+
+
+            /* HSAVE MSR */
+            pContext->pGuestStates[procsInited].pHSave = MmAllocateContiguousMemorySpecifyCache(HSAVE_SIZE, lowest, highest, zero, MmCached);
+            if (!pContext->pGuestStates[procsInited].pHSave) {
+                
+                /* This would have been allocated, need to free for next loop */
+                MmFreeContiguousMemory(pContext->pGuestStates[procsInited].pVMCB);
+
+                DbgPrintErr("[GROUP=%u, CPU=%u] Error allocating HSAVE\n", groupNum, procNum);
+                continue;
+            }
+            RtlSecureZeroMemory(pContext->pGuestStates[procsInited].pHSave, HSAVE_SIZE);
+
+            PHYSICAL_ADDRESS pa = MmGetPhysicalAddress(pContext->pGuestStates[procsInited].pHSave);
+            SetHSave(pa.QuadPart);
             EnableSvme();
+            DbgPrintInfo("[GROUP=%u, CPU=%u] Turned on SVME\n", groupNum, procNum);
+
+            procsInited++;
         }
         KeRevertToUserGroupAffinityThread(&first);
     }
 
+    /* Should never trigger unless a new CPU appeared */
+    if (procsInited != pContext->totalProcessorCount) {
+        DbgPrintInfo("Mismatch between number of processors and number initialised. total=%u, inited=%u",
+            pContext->totalProcessorCount, procsInited);
+    }
 
     WdfRequestComplete(request, STATUS_SUCCESS);
 }
@@ -180,8 +265,61 @@ WdfDeviceFileClose(
     _In_ WDFFILEOBJECT fileObject
 )
 {
-    UNREFERENCED_PARAMETER(fileObject);
     DbgPrintInfo("WdfDeviceFileClose\n");
+
+    DEVICE_CONTEXT* pContext = WdfObjectGet_DEVICE_CONTEXT(WdfFileObjectGetDevice(fileObject));
+
+    /* Iterate all processors and turn off SVME */
+    ULONG procsDeled = 0;
+    USHORT groupCount = KeQueryActiveGroupCount();
+    for (USHORT groupNum = 0; groupNum < groupCount; groupNum++) {
+
+        GROUP_AFFINITY current;
+        GROUP_AFFINITY first;
+        RtlZeroMemory(&current, sizeof(current));
+        RtlZeroMemory(&first, sizeof(first));
+
+        ULONG procCount = KeQueryActiveProcessorCountEx(groupNum);
+        for (ULONG procNum = 0;
+            procNum < procCount;
+            procNum++) {
+
+            current.Group = groupNum;
+            current.Mask = 1i64 << procNum;
+
+            /* Store the affinity of the first processor in the group */
+            if (procNum == 0) {
+                KeSetSystemGroupAffinityThread(&current, &first);
+            }
+            else {
+                KeSetSystemGroupAffinityThread(&current, NULL);
+            }
+           
+            DisableSvme();
+            DbgPrintInfo("[GROUP=%u, CPU=%u] Turned off SVME\n", groupNum, procNum);
+
+            procsDeled++;
+        }
+        KeRevertToUserGroupAffinityThread(&first);
+    }
+
+    /* Should never trigger unless a new CPU appeared */
+    if (procsDeled != pContext->totalProcessorCount) {
+        DbgPrintInfo("Mismatch between number of processors and number initialised. total=%u, deled=%u",
+            pContext->totalProcessorCount, procsDeled);
+    }
+
+    /* Iterate all the states allocated and free memory */
+    for (ULONG i = 0; i < pContext->totalProcessorCount; ++i) {
+        if (pContext->pGuestStates[i].pVMCB) {
+            MmFreeContiguousMemory(pContext->pGuestStates[i].pVMCB);
+            pContext->pGuestStates[i].pVMCB = NULL;
+        }
+        if (pContext->pGuestStates[i].pHSave) {
+            MmFreeContiguousMemory(pContext->pGuestStates[i].pHSave);
+            pContext->pGuestStates[i].pHSave = NULL;
+        }
+    }
 }
 
 VOID
@@ -213,6 +351,7 @@ WdfQueueWrite(
     WdfRequestCompleteWithInformation(Request, STATUS_SUCCESS, 0);
 }
 
+
 VOID
 WdfQueueDeviceIoControl(
     _In_ WDFQUEUE Queue,
@@ -229,4 +368,15 @@ WdfQueueDeviceIoControl(
 
     DbgPrintInfo("WdfQueueDeviceIoControl\n");
     WdfRequestCompleteWithInformation(Request, STATUS_SUCCESS, 0);
+}
+
+VOID 
+WdfDeviceContextCleanup(
+    _In_ WDFOBJECT device
+)
+{
+    DEVICE_CONTEXT* pContext = WdfObjectGet_DEVICE_CONTEXT(device);
+    if (pContext) {
+        ExFreePoolWithTag(pContext->pGuestStates, POOL_TAG);
+    }
 }
