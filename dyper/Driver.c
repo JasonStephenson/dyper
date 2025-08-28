@@ -19,6 +19,8 @@ extern void SetHSave(ULONG_PTR physicalAddress);
 extern BOOLEAN SupportCheckMSR();
 extern BOOLEAN SupportCheckIsAMD();
 extern BOOLEAN SupportCheckCanEnableSVM();
+extern BOOLEAN SupportCheckHasSLAT();
+extern BOOLEAN SupportCheckHasVmcbClean();
 
 typedef struct _DEVICE_CONTEXT
 {
@@ -27,16 +29,18 @@ typedef struct _DEVICE_CONTEXT
 }DEVICE_CONTEXT, *PDEVICE_CONTEXTE;
 WDF_DECLARE_CONTEXT_TYPE(DEVICE_CONTEXT);
 
+/*
+Ordering of calls in this function are important
+For example, there's no point executing more cpuid's if not on an AMD processor
+*/
 BOOLEAN PrintAndConfirmCpuSuport() {
     BOOLEAN isAmd = SupportCheckIsAMD();
     DbgPrintInfo("IsAMD: %d\n", isAmd);
 
-    /* If its not AMD no point checking the rest */
     if (!isAmd) {
         return FALSE;
     }
 
-    /* Need to be able to use RDMSR for other checks to be ok */
     BOOLEAN msrOk = SupportCheckMSR();
     DbgPrintInfo("RSMSR/WRMSR: %d\n", msrOk);
     if (!msrOk) {
@@ -45,8 +49,22 @@ BOOLEAN PrintAndConfirmCpuSuport() {
 
     BOOLEAN svmOk = SupportCheckCanEnableSVM();
     DbgPrintInfo("Can enable SVM: %d\n", svmOk);
+    if (!svmOk) {
+        return FALSE;
+    }
 
-    return svmOk;
+
+    BOOLEAN gotSlat = SupportCheckHasSLAT();
+    DbgPrintInfo("Has SLAT(NPT): %d\n", gotSlat);
+    if (!gotSlat) {
+        return FALSE;
+    }
+
+    /* Not mandatory... yet */
+    BOOLEAN gotVmcbClean = portCheckHasVmcbClean();
+    DbgPrintInfo("Has VmcbClean: %d\n", gotVmcbClean);
+
+    return TRUE;
 }
 
 NTSTATUS

@@ -1,12 +1,14 @@
 PUBLIC SupportCheckIsAMD
 PUBLIC SupportCheckMSR
 PUBLIC SupportCheckCanEnableSVM
+PUBLIC SupportCheckHasSLAT
+PUBLIC SupportCheckHasVmcbClean
 
 .code _text
 
 ; Look for "AuthenticAMD" vendor string
 SupportCheckIsAMD PROC
-    push rbx                        ; preserve non volatile ebx affected by cpuid
+    push rbx                        ; Preserve non volatile ebx affected by cpuid
 
     xor eax, eax
     cpuid
@@ -31,7 +33,7 @@ SupportCheckIsAMD ENDP
 ; Support for the RDMSR/WRMSR instructions are indicated by 
 ; CPUID Fn0000_0001_EDX[MSR] = 1 ORCPUID Fn8000_0001_EDX[MSR] = 1
 SupportCheckMSR PROC
-    push rbx                        ; preserve non volatile ebx affected by cpuid
+    push rbx                        ; Preserve non volatile ebx affected by cpuid
     
     mov eax, 0001h
     cpuid
@@ -56,7 +58,7 @@ SupportCheckMSR ENDP
 ; Check CPU supports SVM instructions
 ; Implementation from Section 15.4 of Vol 2
 SupportCheckCanEnableSVM PROC
-    push rbx ; preserve non volatile ebx affected by cpuid
+    push rbx                        ; Preserve non volatile ebx affected by cpuid
 
     mov eax, 80000001h
     cpuid
@@ -85,5 +87,35 @@ supported:
     pop rbx
     ret
 SupportCheckCanEnableSVM ENDP
+
+SupportCheckHasSLAT PROC
+    push rbx                        ; Preserve non volatile ebx affected by cpuid
+
+    mov ecx, 8000000Ah
+    cpuid
+
+    xor eax, eax
+    test edx, 1                     ; Bit 0 (NP)
+    setnz al
+
+    pop rbx
+    ret
+
+SupportCheckHasSLAT ENDP
+
+SupportCheckHasVmcbClean PROC
+    push rbx                        ; Preserve non volatile ebx affected by cpuid
+
+    mov ecx, 8000000Ah
+    cpuid
+
+    xor eax, eax
+    test edx, 20h                   ; Bit 5 (VmcbClean)
+    setnz al
+
+    pop rbx
+    ret
+
+SupportCheckHasVmcbClean ENDP
 
 END
